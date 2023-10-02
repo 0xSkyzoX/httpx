@@ -1,22 +1,21 @@
-use std::io::Error;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 
-struct Route<R, Q> {
-    path: &'static str, // Make sure path is a static string
-    func: fn(req: &R, res: &mut Q) -> Result<(), Error>,
+struct Route<'a> {
+    path: &'a str, // Make sure path is a static string
+    html: &'a str
 }
 
-pub struct HttpServer<R, Q> {
-    routes: Vec<Route<R, Q>>,
+pub struct HttpServer<'a> {
+    routes: Vec<Route<'a>>,
     listener: TcpListener,
     host: String
 }
 
-impl<R, Q> HttpServer<R, Q> {
+impl <'a>HttpServer<'a> {
     pub fn new(host: &str) -> Self {
 
-        let listener = TcpListener::bind(host).unwrap();
+        let listener: TcpListener = TcpListener::bind(host).unwrap();
 
         HttpServer {
             routes: Vec::new(),
@@ -27,11 +26,10 @@ impl<R, Q> HttpServer<R, Q> {
 
     pub fn start(&self) {
         println!("Starting server on host: {}", self.host);
-        let mut buffer: [u8; 1024] = [0; 1024];
         for stream in self.listener.incoming() {
             match stream {
                 Ok(stream) => {
-                    println!("Connection!");
+                    self.handle_connection(stream)
                 }
                 Err(e) => {
                     eprintln!("Error accepting connection: {}", e);
@@ -40,26 +38,39 @@ impl<R, Q> HttpServer<R, Q> {
         }
     }
 
-    // fn handle_connection(&self, mut stream: TcpStream) {
-    //     let mut buffer: [u8; 1024] = [0; 1024];
-    //     stream.read(&mut buffer).unwrap();
+    fn route_request(&self, request: &str) -> String {
+        for route in &self.routes {
+            if request.contains(&route.path) {
+                return format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
+                    route.html.len(),
+                    route.html
+                );
+            }
+        }
+        return "HTTP/1.1 404 Not Found\r\n\r\n404 Not Found".to_string();
+    }
 
-    //     let request: std::borrow::Cow<'_, str> = String::from_utf8_lossy(&buffer);
-    //     let response: String = self.route_request(&request);
-    //     let mut body: std::str::Split<'_, &str> = request.split("\r\n");
-    //     let body_size: usize = body.clone().count();
-    //     if let Some(body_line) = body.nth(body_size-1) {
-    //         // This is the body
-    //         println!("{}", body_line);
-    //     } else {
-    //         println!("Second line not found.");
-    //     }
+    fn handle_connection(&self, mut stream: TcpStream) {
+        let mut buffer: [u8; 1024] = [0; 1024];
+        stream.read(&mut buffer).unwrap();
 
-    //     stream.write(response.as_bytes()).unwrap();
-    //     stream.flush().unwrap();
-    // }
+        let request: std::borrow::Cow<'_, str> = String::from_utf8_lossy(&buffer);
+        let response: String = self.route_request(&request);
+        let mut body: std::str::Split<'_, &str> = request.split("\r\n");
+        let body_size: usize = body.clone().count();
+        if let Some(body_line) = body.nth(body_size-1) {
+            // This is the body
+            println!("{}", body_line);
+        } else {
+            println!("Second line not found.");
+        }
 
-    pub fn add_route(&mut self, path: &'static str, func: fn(req: &R, res: &mut Q) -> Result<(), Error>) {
-        self.routes.push(Route { path, func });
+        stream.write(response.as_bytes()).unwrap();
+        stream.flush().unwrap();
+    }
+
+    pub fn add_route(&mut self, path: &'a str, html: &'a str) {
+        self.routes.push(Route { path,  html});
     }   
 }
